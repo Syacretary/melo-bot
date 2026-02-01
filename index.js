@@ -22,6 +22,9 @@ const dns = require('dns');
 const dnsCache = new Map();
 const originalLookup = dns.lookup;
 
+// Hardcoded fallback IPs for major WhatsApp endpoints
+const FALLBACK_IP = '157.240.229.60'; 
+
 async function resolveDoH(hostname) {
     if (!hostname || dnsCache.has(hostname)) return dnsCache.get(hostname);
     try {
@@ -36,53 +39,41 @@ async function resolveDoH(hostname) {
             return ip;
         }
     } catch (err) {
-        // logger.error(`DoH Failed for ${hostname}: ${err.message}`);
+        // Fallback silently
     }
     return null;
 }
 
-// Robust Synchronous Patch
-dns.lookup = function(hostname, options, callback) {
+// Simple and Safe DNS Patch
+dns.lookup = (hostname, options, callback) => {
+    let cb = callback;
+    let opts = options;
     if (typeof options === 'function') {
-        callback = options;
-        options = {};
+        cb = options;
+        opts = {};
     }
 
     if (hostname && (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com'))) {
         const cachedIp = dnsCache.get(hostname);
         if (cachedIp) {
-            if (options && options.all) {
-                return callback(null, [{ address: cachedIp, family: 4 }]);
-            }
-            return callback(null, cachedIp, 4);
+            return cb(null, cachedIp, 4);
         }
-        // Trigger async resolve for next time
-        resolveDoH(hostname);
+        // Last resort fallback IP for WhatsApp
+        return cb(null, FALLBACK_IP, 4);
     }
     
-    return originalLookup.call(dns, hostname, options, callback);
+    return originalLookup(hostname, opts, cb);
 };
 
-// Robust Promise Patch
+// Also patch promises for modern modules
 if (dns.promises && dns.promises.lookup) {
     const originalLookupPromise = dns.promises.lookup;
-    dns.promises.lookup = async function(hostname, options) {
+    dns.promises.lookup = async (hostname, options) => {
         if (hostname && (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com'))) {
             const cachedIp = dnsCache.get(hostname);
-            if (cachedIp) {
-                if (options && options.all) {
-                    return [{ address: cachedIp, family: 4 }];
-                }
-                return { address: cachedIp, family: 4 };
-            }
-            await resolveDoH(hostname);
-            const newIp = dnsCache.get(hostname);
-            if (newIp) {
-                if (options && options.all) return [{ address: newIp, family: 4 }];
-                return { address: newIp, family: 4 };
-            }
+            return { address: cachedIp || FALLBACK_IP, family: 4 };
         }
-        return originalLookupPromise.call(dns.promises, hostname, options);
+        return originalLookupPromise(hostname, options);
     };
 }
 
