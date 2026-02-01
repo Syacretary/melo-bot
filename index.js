@@ -24,6 +24,20 @@ if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
 }
 
+// HARDCODED DNS MAPPING (The "No-Lookup" Fix)
+const originalLookup = dns.lookup;
+dns.lookup = (hostname, options, callback) => {
+    if (typeof options === 'function') {
+        callback = options;
+        options = {};
+    }
+    if (hostname === 'web.whatsapp.com') {
+        // Alamat IP WhatsApp yang kita temukan tadi
+        return callback(null, '57.144.193.32', 4);
+    }
+    return originalLookup(hostname, options, callback);
+};
+
 const config = require('./config');
 
 async function testDNS() {
