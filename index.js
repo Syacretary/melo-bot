@@ -19,14 +19,12 @@ const express = require('express');
 const dns = require('dns');
 
 // --- DNS-over-HTTPS (DoH) Bridge ---
-// This bypasses strict cloud DNS restrictions by fetching IPs over HTTPS (Port 443)
-const originalLookup = dns.lookup;
 const dnsCache = new Map();
+const originalLookup = dns.lookup;
 
 async function resolveDoH(hostname) {
     if (dnsCache.has(hostname)) return dnsCache.get(hostname);
     try {
-        // Use Cloudflare DNS-over-HTTPS API
         const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
             headers: { 'accept': 'application/dns-json' },
             timeout: 5000
@@ -34,42 +32,49 @@ async function resolveDoH(hostname) {
         const ip = res.data.Answer?.find(a => a.type === 1)?.data;
         if (ip) {
             dnsCache.set(hostname, ip);
+            logger.info(`DoH Resolved: ${hostname} -> ${ip}`);
             return ip;
         }
     } catch (err) {
-        // Fallback silently
+        logger.error(`DoH Failed for ${hostname}: ${err.message}`);
     }
     return null;
 }
 
-dns.lookup = async (hostname, options, callback) => {
+// Fixed Synchronous Patch
+dns.lookup = (hostname, options, callback) => {
     if (typeof options === 'function') {
         callback = options;
         options = {};
     }
 
-    // Intercept WhatsApp domains
     if (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com')) {
-        const ip = await resolveDoH(hostname);
-        if (ip) {
-            return callback(null, ip, 4);
+        const cachedIp = dnsCache.get(hostname);
+        if (cachedIp) {
+            return callback(null, cachedIp, 4);
         }
+        // If not in cache, trigger async resolve for next time but continue with original
+        resolveDoH(hostname);
     }
     
     return originalLookup(hostname, options, callback);
 };
 
-// Also patch dns.promises.lookup for modern libraries
-const originalLookupPromise = dns.promises.lookup;
-dns.promises.lookup = async (hostname, options) => {
-    if (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com')) {
-        const ip = await resolveDoH(hostname);
-        if (ip) return { address: ip, family: 4 };
-    }
-    return originalLookupPromise(hostname, options);
-};
-
 const config = require('./config');
+
+async function prepareDNS() {
+    const domains = [
+        'web.whatsapp.com',
+        'g.whatsapp.net',
+        'c.whatsapp.net',
+        'v.whatsapp.net',
+        'mmx.whatsapp.net'
+    ];
+    logger.info('Pre-resolving WhatsApp domains via DoH...');
+    for (const domain of domains) {
+        await resolveDoH(domain);
+    }
+}
 
 async function testDNS() {
     return new Promise((resolve) => {
@@ -522,8 +527,8 @@ async function handleDocument(sock, msg, docMsg) {
 }
 
 // --- START ---
-logger.info('Waiting 10s for network initialization...');
+logger.info('Waiting 10s for network and DNS initialization...');
 setTimeout(async () => {
-    await testDNS();
+    await prepareDNS();
     startBot().catch(err => logger.fatal(`Startup Crash: ${err.message}`));
 }, 10000);
