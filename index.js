@@ -18,24 +18,55 @@ const mime = require('mime-types');
 const express = require('express');
 const dns = require('dns');
 
-// DNS Fix for Cloud Environments (ENOTFOUND Fix)
-dns.setServers(['8.8.8.8', '1.1.1.1']);
-if (dns.setDefaultResultOrder) {
-    dns.setDefaultResultOrder('ipv4first');
+// --- DNS-over-HTTPS (DoH) Bridge ---
+// This bypasses strict cloud DNS restrictions by fetching IPs over HTTPS (Port 443)
+const originalLookup = dns.lookup;
+const dnsCache = new Map();
+
+async function resolveDoH(hostname) {
+    if (dnsCache.has(hostname)) return dnsCache.get(hostname);
+    try {
+        // Use Cloudflare DNS-over-HTTPS API
+        const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
+            headers: { 'accept': 'application/dns-json' },
+            timeout: 5000
+        });
+        const ip = res.data.Answer?.find(a => a.type === 1)?.data;
+        if (ip) {
+            dnsCache.set(hostname, ip);
+            return ip;
+        }
+    } catch (err) {
+        // Fallback silently
+    }
+    return null;
 }
 
-// HARDCODED DNS MAPPING (The "No-Lookup" Fix)
-const originalLookup = dns.lookup;
-dns.lookup = (hostname, options, callback) => {
+dns.lookup = async (hostname, options, callback) => {
     if (typeof options === 'function') {
         callback = options;
         options = {};
     }
-    if (hostname === 'web.whatsapp.com') {
-        // Alamat IP WhatsApp yang kita temukan tadi
-        return callback(null, '57.144.193.32', 4);
+
+    // Intercept WhatsApp domains
+    if (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com')) {
+        const ip = await resolveDoH(hostname);
+        if (ip) {
+            return callback(null, ip, 4);
+        }
     }
+    
     return originalLookup(hostname, options, callback);
+};
+
+// Also patch dns.promises.lookup for modern libraries
+const originalLookupPromise = dns.promises.lookup;
+dns.promises.lookup = async (hostname, options) => {
+    if (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com')) {
+        const ip = await resolveDoH(hostname);
+        if (ip) return { address: ip, family: 4 };
+    }
+    return originalLookupPromise(hostname, options);
 };
 
 const config = require('./config');
