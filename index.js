@@ -20,8 +20,25 @@ const dns = require('dns');
 
 // DNS Fix for Cloud Environments (ENOTFOUND Fix)
 dns.setServers(['8.8.8.8', '1.1.1.1']);
+if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+}
 
 const config = require('./config');
+
+async function testDNS() {
+    return new Promise((resolve) => {
+        dns.lookup('web.whatsapp.com', (err, address) => {
+            if (err) {
+                logger.error(`DNS Diagnostic Failed: ${err.message}`);
+                resolve(false);
+            } else {
+                logger.info(`DNS Diagnostic Success: web.whatsapp.com resolved to ${address}`);
+                resolve(true);
+            }
+        });
+    });
+}
 const app = express();
 const PORT = process.env.PORT || 7860; // Port default Hugging Face
 
@@ -461,6 +478,7 @@ async function handleDocument(sock, msg, docMsg) {
 
 // --- START ---
 logger.info('Waiting 10s for network initialization...');
-setTimeout(() => {
+setTimeout(async () => {
+    await testDNS();
     startBot().catch(err => logger.fatal(`Startup Crash: ${err.message}`));
 }, 10000);
