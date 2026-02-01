@@ -1,3 +1,12 @@
+---
+title: Melo
+emoji: 🤖
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # 🤖 WhatsApp AI Bot (Baileys + Gemini + RAG + Local Tools)
 
 Bot WhatsApp canggih berbasis `Baileys` yang terintegrasi dengan berbagai provider AI (Multi-Modal) menggunakan sistem **Native Tool Calling** dan **RAG (Retrieval-Augmented Generation)**. Bot ini dirancang untuk performa tinggi, efisiensi token, dan kemampuan pengolahan file lokal yang kuat.
