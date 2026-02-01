@@ -76,6 +76,26 @@ async function startBot() {
         connectTimeoutMs: 60000
     });
 
+    // --- PAIRING CODE LOGIC ---
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = process.env.PHONE_NUMBER || config.phoneNumber;
+        if (phoneNumber) {
+            logger.info(`Requesting Pairing Code for: ${phoneNumber}`);
+            setTimeout(async () => {
+                try {
+                    const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
+                    console.log('\n\n' + '='.repeat(30));
+                    console.log(`YOUR PAIRING CODE: ${code}`);
+                    console.log('='.repeat(30) + '\n\n');
+                } catch (e) {
+                    logger.error(`Failed to get pairing code: ${e.message}`);
+                }
+            }, 3000);
+        } else {
+            logger.warn('No Phone Number found for Pairing Code. Please provide PHONE_NUMBER env.');
+        }
+    }
+
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
