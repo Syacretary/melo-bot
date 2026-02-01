@@ -16,6 +16,10 @@ const axios = require('axios');
 const Groq = require('groq-sdk');
 const mime = require('mime-types');
 const express = require('express');
+const dns = require('dns');
+
+// DNS Fix for Cloud Environments (ENOTFOUND Fix)
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const config = require('./config');
 const app = express();
