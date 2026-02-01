@@ -80,19 +80,25 @@ async function startBot() {
     if (!sock.authState.creds.registered) {
         const phoneNumber = process.env.PHONE_NUMBER || config.phoneNumber;
         if (phoneNumber) {
-            logger.info(`Requesting Pairing Code for: ${phoneNumber}`);
+            logger.info(`Requesting Pairing Code for: ${phoneNumber} in 10s...`);
             setTimeout(async () => {
                 try {
                     const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
-                    console.log('\n\n' + '='.repeat(30));
-                    console.log(`YOUR PAIRING CODE: ${code}`);
-                    console.log('='.repeat(30) + '\n\n');
+                    console.log('\n' + '='.repeat(40));
+                    console.log(`🚀 YOUR PAIRING CODE: ${code}`);
+                    console.log('='.repeat(40) + '\n');
                 } catch (e) {
                     logger.error(`Failed to get pairing code: ${e.message}`);
+                    logger.info('Retrying Pairing Code request...');
+                    // Clear session and restart if it persists
+                    if (e.message.includes('Closed')) {
+                        fs.emptyDirSync(SESSION_DIR);
+                        startBot();
+                    }
                 }
-            }, 3000);
+            }, 10000); // Increased delay to 10s
         } else {
-            logger.warn('No Phone Number found for Pairing Code. Please provide PHONE_NUMBER env.');
+            logger.warn('No Phone Number found for Pairing Code.');
         }
     }
 
@@ -102,9 +108,18 @@ async function startBot() {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const statusCode = (lastDisconnect.error instanceof Boom) ? lastDisconnect.error.output.statusCode : null;
+            
+            // Force reconnect except for explicit logout
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            
             logger.error(`Connection closed: ${lastDisconnect.error?.message}. Reconnecting: ${shouldReconnect}`);
-            if (shouldReconnect) setTimeout(startBot, 5000);
+            if (shouldReconnect) {
+                setTimeout(startBot, 5000);
+            } else {
+                logger.fatal('Logged out. Clearing session for new login...');
+                fs.emptyDirSync(SESSION_DIR);
+                startBot();
+            }
         } else if (connection === 'open') {
             logger.info('SUCCESS: Connected to WhatsApp!');
             reminderService.init(sock);
