@@ -23,7 +23,7 @@ const dnsCache = new Map();
 const originalLookup = dns.lookup;
 
 async function resolveDoH(hostname) {
-    if (dnsCache.has(hostname)) return dnsCache.get(hostname);
+    if (!hostname || dnsCache.has(hostname)) return dnsCache.get(hostname);
     try {
         const res = await axios.get(`https://cloudflare-dns.com/dns-query?name=${hostname}&type=A`, {
             headers: { 'accept': 'application/dns-json' },
@@ -36,29 +36,55 @@ async function resolveDoH(hostname) {
             return ip;
         }
     } catch (err) {
-        logger.error(`DoH Failed for ${hostname}: ${err.message}`);
+        // logger.error(`DoH Failed for ${hostname}: ${err.message}`);
     }
     return null;
 }
 
-// Fixed Synchronous Patch
-dns.lookup = (hostname, options, callback) => {
+// Robust Synchronous Patch
+dns.lookup = function(hostname, options, callback) {
     if (typeof options === 'function') {
         callback = options;
         options = {};
     }
 
-    if (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com')) {
+    if (hostname && (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com'))) {
         const cachedIp = dnsCache.get(hostname);
         if (cachedIp) {
+            if (options && options.all) {
+                return callback(null, [{ address: cachedIp, family: 4 }]);
+            }
             return callback(null, cachedIp, 4);
         }
-        // If not in cache, trigger async resolve for next time but continue with original
+        // Trigger async resolve for next time
         resolveDoH(hostname);
     }
     
-    return originalLookup(hostname, options, callback);
+    return originalLookup.call(dns, hostname, options, callback);
 };
+
+// Robust Promise Patch
+if (dns.promises && dns.promises.lookup) {
+    const originalLookupPromise = dns.promises.lookup;
+    dns.promises.lookup = async function(hostname, options) {
+        if (hostname && (hostname.includes('whatsapp.net') || hostname.includes('whatsapp.com'))) {
+            const cachedIp = dnsCache.get(hostname);
+            if (cachedIp) {
+                if (options && options.all) {
+                    return [{ address: cachedIp, family: 4 }];
+                }
+                return { address: cachedIp, family: 4 };
+            }
+            await resolveDoH(hostname);
+            const newIp = dnsCache.get(hostname);
+            if (newIp) {
+                if (options && options.all) return [{ address: newIp, family: 4 }];
+                return { address: newIp, family: 4 };
+            }
+        }
+        return originalLookupPromise.call(dns.promises, hostname, options);
+    };
+}
 
 const config = require('./config');
 
