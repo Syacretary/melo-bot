@@ -113,20 +113,29 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom)
-                ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
-                : true;
+            const statusCode = (lastDisconnect.error instanceof Boom) 
+                ? lastDisconnect.error.output.statusCode 
+                : null;
             
-            logger.error(`Connection lost: ${lastDisconnect.error?.message}. Reconnecting: ${shouldReconnect}`);
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            const reason = lastDisconnect.error?.message || 'Unknown Reason';
+            
+            logger.error(`Connection lost: ${reason}. Reconnecting: ${shouldReconnect}`);
             
             if (shouldReconnect) {
-                setTimeout(startBot, 5000); // 5s delay before reconnect
+                // Exponential backoff to avoid spamming logs (5s, 10s, 20s, max 60s)
+                const delay = Math.min(60000, (global.reconnectAttempts || 0) * 5000 + 5000);
+                global.reconnectAttempts = (global.reconnectAttempts || 0) + 1;
+                
+                logger.info(`Retrying connection in ${delay/1000}s... (Attempt ${global.reconnectAttempts})`);
+                setTimeout(startBot, delay);
             } else {
                 logger.fatal('Logged out. Please delete session folder and restart.');
                 process.exit(1);
             }
         } else if (connection === 'open') {
             logger.info('SUCCESS: Bot is now online and connected.');
+            global.reconnectAttempts = 0; // Reset on success
             reminderService.init(sock);
         }
     });
@@ -447,4 +456,7 @@ async function handleDocument(sock, msg, docMsg) {
 }
 
 // --- START ---
-startBot().catch(err => logger.fatal(`Startup Crash: ${err.message}`));
+logger.info('Waiting 10s for network initialization...');
+setTimeout(() => {
+    startBot().catch(err => logger.fatal(`Startup Crash: ${err.message}`));
+}, 10000);
