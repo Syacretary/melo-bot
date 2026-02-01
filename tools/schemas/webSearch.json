@@ -1,0 +1,14 @@
+{
+  "name": "webSearch",
+  "description": "Tools untuk mencari informasi realtime atau terbaru",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "query": {
+        "type": "STRING",
+        "description": "The search query."
+      }
+    },
+    "required": ["query"]
+  }
+}

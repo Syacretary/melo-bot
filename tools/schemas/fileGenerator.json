@@ -1,0 +1,23 @@
+{
+  "name": "fileGenerator",
+  "description": "Generates a file (PDF, DOCX, TXT, Python, JS, HTML) with the provided content. Use this when the user asks to create a file or download code.",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "filename": {
+        "type": "STRING",
+        "description": "The name of the file to create (e.g., 'report.pdf', 'script.py')."
+      },
+      "content": {
+        "type": "STRING",
+        "description": "The text content or code to put inside the file."
+      },
+      "format": {
+        "type": "STRING",
+        "enum": ["pdf", "docx", "txt", "code"],
+        "description": "The format of the file."
+      }
+    },
+    "required": ["filename", "content", "format"]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "imageGenerator",
+  "description": "Generates or edits an image based on a prompt. Can use an existing image as reference if provided. Use this when the user wants to create, visualize, or edit something visually.",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "prompt": {
+        "type": "STRING",
+        "description": "The creative and detailed visual description of the image to generate, expanded from the user's request."
+      }
+    },
+    "required": ["prompt"]
+  }
+}

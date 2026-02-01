@@ -1,0 +1,23 @@
+{
+  "name": "manageReminder",
+  "description": "Registers a new reminder or to-do list item for the user. AI should determine the specific date and time based on user input. For 'malam', assume 18:00 or 19:00 unless specified otherwise.",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "task": {
+        "type": "STRING",
+        "description": "The description of the task or note to be reminded of."
+      },
+      "scheduledTime": {
+        "type": "STRING",
+        "description": "The ISO 8601 formatted date and time for the reminder (e.g., '2026-02-02T18:00:00Z'). AI must calculate this relative to the current time."
+      },
+      "action": {
+        "type": "STRING",
+        "enum": ["add", "list", "delete"],
+        "description": "The action to perform."
+      }
+    },
+    "required": ["task", "scheduledTime", "action"]
+  }
+}

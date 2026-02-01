@@ -1,0 +1,14 @@
+{
+  "name": "fileConverter",
+  "description": "Converts any file format to another format (e.g., PDF to DOCX, JPG to PNG, MP4 to MP3, etc.). Use this when the user asks to change the format of a file they sent or quoted.",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "outputFormat": {
+        "type": "STRING",
+        "description": "The target format extension (e.g., 'pdf', 'docx', 'mp3', 'png')."
+      }
+    },
+    "required": ["outputFormat"]
+  }
+}

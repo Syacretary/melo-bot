@@ -1,0 +1,17 @@
+node_modules/
+venv/
+.env
+.env.example
+session/
+temp_files/
+*.log
+session_b64.txt
+session_small.zip
+session.zip
+b64.txt
+test_file_gen.js
+hf_upload.js
+package-lock.json
+.DS_Store
+.gemini/
+.gemini_security/

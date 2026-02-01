@@ -1,0 +1,15 @@
+{
+  "name": "stickerMaker",
+  "description": "Converts an image or video into a WhatsApp sticker. Use this when the user explicitly asks to create a sticker from media they sent or quoted.",
+  "parameters": {
+    "type": "OBJECT",
+    "properties": {
+      "target": {
+        "type": "STRING",
+        "description": "Set to 'auto' to indicate using the attached or quoted media.",
+        "enum": ["auto"]
+      }
+    },
+    "required": ["target"]
+  }
+}
