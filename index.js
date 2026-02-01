@@ -41,11 +41,11 @@ const logger = pino({
     }
 });
 
-// --- HTTP SERVER (Anti-Sleep) ---
+// --- HTTP SERVER (Health Check for Zeabur) ---
 const app = express();
-const PORT = process.env.PORT || 7860;
-app.get('/', (req, res) => res.send('Bot Melo is Live!'));
-app.listen(PORT, () => logger.info(`Health check server running on port ${PORT}`));
+const PORT = process.env.PORT || 8080;
+app.get('/', (req, res) => res.send('Melo Bot is Active!'));
+app.listen(PORT, () => logger.info(`Health check server active on port ${PORT}`));
 
 // AI Setup
 const genAI = new GoogleGenerativeAI(config.ai.google.apiKey);
@@ -73,9 +73,7 @@ async function startBot() {
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
         generateHighQualityLinkPreview: true,
         printQRInTerminal: true,
-        connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 0,
-        keepAliveIntervalMs: 10000
+        connectTimeoutMs: 60000
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -86,9 +84,9 @@ async function startBot() {
             const statusCode = (lastDisconnect.error instanceof Boom) ? lastDisconnect.error.output.statusCode : null;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             logger.error(`Connection closed: ${lastDisconnect.error?.message}. Reconnecting: ${shouldReconnect}`);
-            if (shouldReconnect) setTimeout(startBot, 10000);
+            if (shouldReconnect) setTimeout(startBot, 5000);
         } else if (connection === 'open') {
-            logger.info('SUCCESS: Bot is online and connected!');
+            logger.info('SUCCESS: Connected to WhatsApp!');
             reminderService.init(sock);
         }
     });
@@ -110,21 +108,28 @@ async function startBot() {
 
                 logger.info({ event: 'INCOMING', from: pushName, chat: remoteJid, text: text.slice(0, 50) });
                 
+                // Track stats
                 statsTracker.addActivity(remoteJid, 'user', text);
 
+                // Recap Handler
                 if (recapManager.isInRecap(remoteJid)) {
-                    const nextStep = await recapManager.getNextStep(remoteJid, text);
-                    if (nextStep) return await sock.sendMessage(remoteJid, { text: parseMarkdownToWhatsApp(nextStep) });
+                    const nextText = await recapManager.getNextStep(remoteJid, text);
+                    if (nextText) return await sock.sendMessage(remoteJid, { text: parseMarkdownToWhatsApp(nextText) });
                 }
 
-                if (text.toLowerCase() === '.recap') {
+                // Command Handler
+                const cleanText = text.toLowerCase().trim();
+                if (cleanText === '.recap') {
                     const intro = await recapManager.initiateRecap(remoteJid, 'monthly');
-                    return await sock.sendMessage(remoteJid, { text: parseMarkdownToWhatsApp(intro || "_Belum ada data yang cukup._") });
+                    return await sock.sendMessage(remoteJid, { text: parseMarkdownToWhatsApp(intro || "_Data belum cukup._") });
                 }
-
-                if (text.toLowerCase() === '.newchat') {
+                if (cleanText === '.newchat') {
                     contextManager.clearHistory(remoteJid);
-                    return await sock.sendMessage(remoteJid, { text: "_Konteks percakapan telah dihapus._" });
+                    return await sock.sendMessage(remoteJid, { text: "_Brain reset. Mari mulai dari nol!_" });
+                }
+                if (cleanText.startsWith('.sticker') || cleanText.startsWith('.stiker')) {
+                    await handleStickerCommand(sock, msg);
+                    continue;
                 }
 
                 if (documentMessage) {
@@ -132,44 +137,42 @@ async function startBot() {
                     continue;
                 }
 
-                if (text.startsWith('.sticker') || text.startsWith('.stiker')) {
-                    await handleStickerCommand(sock, msg);
-                    continue;
-                }
-
                 if (!text && !isImage && !isVideo && !isSticker) continue;
 
+                // Context Preparation
                 let finalUserText = text;
                 if (pendingDocumentContexts.has(remoteJid)) {
-                    finalUserText = `Ini adalah isi dokumen yang saya miliki:\n'${pendingDocumentContexts.get(remoteJid)}'\n${text || "Jelaskan isi dokumen ini."}`;
+                    finalUserText = `Ini adalah isi dokumen yang saya miliki:
+'${pendingDocumentContexts.get(remoteJid)}'
+${text || "Jelaskan isi dokumen ini."}`;
                     pendingDocumentContexts.delete(remoteJid);
                 }
+                if (isSticker) finalUserText = `[User sent a sticker] ${text || "Berikan respon singkat dan asik tentang stiker ini."}`;
 
-                if (isSticker) {
-                    finalUserText = `[Sticker Received] ${text || "Berikan respon interaktif terhadap stiker ini."}`;
-                }
-
+                // Media Download
                 let mediaParts = [];
                 let currentMediaPath = null;
                 if (isImage || isVideo || isSticker) {
                     const buffer = await downloadMediaMessage(msg, 'buffer', {});
                     const mimeType = isImage ? 'image/jpeg' : (isVideo ? 'video/mp4' : 'image/webp');
                     mediaParts.push({ inlineData: { data: buffer.toString('base64'), mimeType } });
-                    currentMediaPath = path.join(TEMP_DIR, `in_${Date.now()}.${mimeType.split('/')[1]}`);
+                    
+                    currentMediaPath = path.join(TEMP_DIR, `in_${Date.now()}.${isImage?'jpg':(isVideo?'mp4':'webp')}`);
                     fs.writeFileSync(currentMediaPath, buffer);
                 }
 
+                // AI Engine
                 contextManager.addMessage(remoteJid, finalUserText, 'user');
                 await sock.sendPresenceUpdate('composing', remoteJid);
 
                 try {
-                    let textResponse = await processWithGemini(sock, msg, remoteJid, text, mediaParts, currentMediaPath);
+                    let textResponse = await processWithGemini(sock, msg, remoteJid, finalUserText, mediaParts, currentMediaPath);
                     if (textResponse) {
                         contextManager.addMessage(remoteJid, textResponse, 'model');
                         await sock.sendMessage(remoteJid, { text: parseMarkdownToWhatsApp(textResponse) });
                     }
                 } catch (e) {
-                    logger.warn("Gemini Failed, trying Groq Fallback...");
+                    logger.warn({ event: 'GEMINI_FAIL', error: e.message });
                     const fallback = await processWithGroq(sock, msg, remoteJid, finalUserText);
                     if (fallback) {
                         contextManager.addMessage(remoteJid, fallback, 'model');
@@ -178,6 +181,7 @@ async function startBot() {
                 } finally {
                     if (currentMediaPath && fs.existsSync(currentMediaPath)) fs.unlinkSync(currentMediaPath);
                 }
+
             } catch (err) { logger.error(err); }
         }
     });
@@ -186,21 +190,24 @@ async function startBot() {
 async function processWithGemini(sock, msg, remoteJid, text, mediaParts, currentMediaPath) {
     const history = contextManager.getHistory(remoteJid);
     const chat = model.startChat({ history: history.slice(0, -1) });
+    
     const messageParts = text ? [text, ...mediaParts] : mediaParts;
-    let result = await chat.sendMessage(messageParts.length > 0 ? messageParts : "Analyze this.");
+    let result = await chat.sendMessage(messageParts.length > 0 ? messageParts : "Respon.");
     let response = await result.response;
     let functionCalls = response.functionCalls();
     
     if (functionCalls) {
         for (const call of functionCalls) {
             const { name, args } = call;
+            // Visual indicators
             if (name === 'webSearch') await sock.sendMessage(remoteJid, { text: `> _Mencari di Google..._` });
             if (name === 'stickerMaker') await sock.sendMessage(remoteJid, { text: `> _Membuat stiker..._` });
             if (name === 'imageGenerator') await sock.sendMessage(remoteJid, { text: `> _Membuat gambar..._` });
-            if (['fileGenerator', 'fileConverter'].includes(name)) await sock.sendMessage(remoteJid, { text: `> _Membuat file..._` });
+            if (['fileGenerator', 'fileConverter'].includes(name)) await sock.sendMessage(remoteJid, { text: `> _Memproses file..._` });
 
             const toolResult = await toolHandler.executeTool(name, args, { remoteJid, filePath: currentMediaPath });
             
+            // Handle specific tool outputs
             if (name === 'imageGenerator' && toolResult.success) await sock.sendMessage(remoteJid, { image: { url: toolResult.imageUrl }, caption: `_Generated by ${toolResult.modelUsed}_` });
             if (['fileGenerator', 'fileConverter'].includes(name) && toolResult.success) {
                 await sock.sendMessage(remoteJid, { document: { url: toolResult.filePath }, mimetype: mime.lookup(toolResult.filePath), fileName: path.basename(toolResult.filePath) });
@@ -216,9 +223,12 @@ async function processWithGemini(sock, msg, remoteJid, text, mediaParts, current
 
 async function processWithGroq(sock, msg, remoteJid, text) {
     const history = contextManager.getHistory(remoteJid);
-    const groqMessages = history.map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.parts[0].text }));
+    const groqMessages = history.map(m => ({
+        role: m.role === 'model' ? 'assistant' : 'user', 
+        content: m.parts[0].text 
+    }));
     const completion = await groq.chat.completions.create({ messages: groqMessages, model: "llama-3.3-70b-versatile" });
-    return completion.choices[0]?.message?.content || "Gagal merespon.";
+    return completion.choices[0]?.message?.content || "Maaf, saya sedang tidak bisa berpikir.";
 }
 
 async function handleStickerCommand(sock, msg) {
@@ -239,12 +249,12 @@ async function handleDocument(sock, msg, docMsg) {
         fs.writeFileSync(tempPath, buffer);
         const text = await ragHandler.extractText(tempPath, docMsg.mimetype);
         if (text) {
-            const analysis = await groqHandler.analyzeDocument(text, "Buat rangkuman detail.");
+            const analysis = await groqHandler.analyzeDocument(text, "Berikan rangkuman dokumen ini secara cerdas.");
             pendingDocumentContexts.set(msg.key.remoteJid, analysis);
-            await sock.sendMessage(msg.key.remoteJid, { text: `> _Dokumen "${docMsg.fileName}" selesai dibaca. Mau di apain?_` });
+            await sock.sendMessage(msg.key.remoteJid, { text: `> _Dokumen "${docMsg.fileName}" selesai dibaca. Mau diapakan?_` });
         }
-        fs.unlinkSync(tempPath);
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
     } catch (e) { logger.error(e); }
 }
 
-startBot().catch(e => logger.error(e));
+startBot().catch(e => logger.error({ event: 'CRASH', error: e.message }));
